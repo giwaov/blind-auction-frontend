@@ -82,6 +82,20 @@ export default function Home() {
   const [selectedAuction, setSelectedAuction] = useState<Auction | null>(null);
   const [bidAmount, setBidAmount] = useState("");
   const [walletConnected, setWalletConnected] = useState(false);
+  const [showWalletModal, setShowWalletModal] = useState(false);
+
+  const handleConnectWallet = () => {
+    if (walletConnected) {
+      setWalletConnected(false);
+    } else {
+      setShowWalletModal(true);
+    }
+  };
+
+  const confirmWalletConnect = () => {
+    setWalletConnected(true);
+    setShowWalletModal(false);
+  };
 
   const formatTimeLeft = (endTime: string) => {
     const end = new Date(endTime).getTime();
@@ -134,7 +148,7 @@ export default function Home() {
             </div>
             
             <button
-              onClick={() => setWalletConnected(!walletConnected)}
+              onClick={handleConnectWallet}
               className="px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-300 hover:scale-105"
               style={{
                 background: walletConnected 
@@ -144,7 +158,7 @@ export default function Home() {
                 border: walletConnected ? `1px solid ${colors.primary}40` : "none"
               }}
             >
-              {walletConnected ? "Fx4G...jUc" : "Connect Wallet"}
+              {walletConnected ? "Fx4G...jUc (Demo)" : "Connect Wallet"}
             </button>
           </div>
         </div>
@@ -597,6 +611,63 @@ export default function Home() {
             >
               {walletConnected ? "Submit Encrypted Bid" : "Connect Wallet"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Wallet Connect Modal */}
+      {showWalletModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.8)" }}>
+          <div className="w-full max-w-md rounded-2xl p-6"
+            style={{ background: colors.surface, border: `1px solid ${colors.primary}40` }}>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold" style={{ color: colors.text }}>
+                Connect Wallet
+              </h3>
+              <button 
+                onClick={() => setShowWalletModal(false)}
+                className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                style={{ color: colors.textMuted }}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-4 rounded-xl mb-4" style={{ background: `${colors.warning}20`, border: `1px solid ${colors.warning}40` }}>
+              <p className="text-sm" style={{ color: colors.warning }}>
+                <strong>Demo Mode:</strong> This is a demonstration. No real wallet will be connected.
+              </p>
+            </div>
+            
+            <p className="text-sm mb-6" style={{ color: colors.textMuted }}>
+              By connecting, you agree to simulate a wallet connection for demo purposes. 
+              In production, this would connect to your Phantom or Solflare wallet.
+            </p>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowWalletModal(false)}
+                className="flex-1 py-3 rounded-xl font-semibold transition-all"
+                style={{ 
+                  background: colors.surfaceLight, 
+                  color: colors.text,
+                  border: `1px solid ${colors.primary}30`
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmWalletConnect}
+                className="flex-1 py-3 rounded-xl font-semibold transition-all hover:scale-[1.02]"
+                style={{
+                  background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
+                  color: colors.text
+                }}
+              >
+                Connect (Demo)
+              </button>
+            </div>
           </div>
         </div>
       )}
