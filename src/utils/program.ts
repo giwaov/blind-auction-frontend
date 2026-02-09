@@ -1,5 +1,4 @@
 import { Connection, PublicKey, GetProgramAccountsFilter } from "@solana/web3.js";
-import * as borsh from "borsh";
 
 // Program ID
 export const PROGRAM_ID = new PublicKey("EGePzFcrUy9d9uxQk7eutiAjUK1kbXHs8FydhMTZWJXX");
