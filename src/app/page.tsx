@@ -20,18 +20,18 @@ const colors = {
 };
 
 // Lock icon component
-function LockIcon({ className = "" }: { className?: string }) {
+function LockIcon({ className = "", style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24" width="20" height="20">
+    <svg className={className} style={style} fill="currentColor" viewBox="0 0 24 24" width="20" height="20">
       <path d="M12 1C8.676 1 6 3.676 6 7v2H4a1 1 0 00-1 1v12a1 1 0 001 1h16a1 1 0 001-1V10a1 1 0 00-1-1h-2V7c0-3.324-2.676-6-6-6zm0 2c2.276 0 4 1.724 4 4v2H8V7c0-2.276 1.724-4 4-4zm0 10a2 2 0 011 3.732V19a1 1 0 11-2 0v-2.268A2 2 0 0112 13z"/>
     </svg>
   );
 }
 
 // Shield icon component  
-function ShieldIcon({ className = "" }: { className?: string }) {
+function ShieldIcon({ className = "", style }: { className?: string; style?: React.CSSProperties }) {
   return (
-    <svg className={className} fill="currentColor" viewBox="0 0 24 24" width="20" height="20">
+    <svg className={className} style={style} fill="currentColor" viewBox="0 0 24 24" width="20" height="20">
       <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
     </svg>
   );
