@@ -1,6 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import { 
+  fetchAllAuctions, 
+  getConnection,
+  generateAuctionId,
+  deriveAuctionPda,
+  DisplayAuction,
+} from "@/utils/program";
 
 // Arcium brand colors
 const colors = {
@@ -37,66 +46,110 @@ function ShieldIcon({ className = "", style }: { className?: string; style?: Rea
   );
 }
 
-interface Auction {
-  id: string;
-  title: string;
-  description: string;
-  endTime: string;
-  bidCount: number;
-  status: "active" | "ended";
-  minBid: number;
+function SpinnerIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg className={`animate-spin ${className}`} fill="none" viewBox="0 0 24 24" width="20" height="20">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+    </svg>
+  );
 }
 
-const mockAuctions: Auction[] = [
-  {
-    id: "1",
-    title: "Rare Digital Artwork #001",
-    description: "A unique piece of generative art with encrypted provenance",
-    endTime: "2026-02-15T18:00:00Z",
-    bidCount: 12,
-    status: "active",
-    minBid: 0.5,
-  },
-  {
-    id: "2", 
-    title: "Vintage NFT Collection",
-    description: "Early blockchain collectibles with private bid history",
-    endTime: "2026-02-12T12:00:00Z",
-    bidCount: 8,
-    status: "active",
-    minBid: 1.2,
-  },
-  {
-    id: "3",
-    title: "Exclusive Access Token",
-    description: "VIP membership with confidential auction process",
-    endTime: "2026-02-10T00:00:00Z",
-    bidCount: 25,
-    status: "ended",
-    minBid: 2.0,
-  },
-];
+// User's bids storage (localStorage for persistence)
+interface UserBid {
+  auctionId: string;
+  auctionPublicKey: string;
+  auctionTitle: string;
+  bidAmount: number;
+  timestamp: number;
+  status: "pending" | "confirmed" | "won" | "lost";
+  txSignature?: string;
+}
 
 export default function Home() {
+  const { publicKey, connected, disconnect, signTransaction } = useWallet();
+  const { connection } = useConnection();
+  const { setVisible } = useWalletModal();
+  
   const [activeTab, setActiveTab] = useState<"browse" | "create" | "mybids">("browse");
-  const [selectedAuction, setSelectedAuction] = useState<Auction | null>(null);
+  const [selectedAuction, setSelectedAuction] = useState<DisplayAuction | null>(null);
   const [bidAmount, setBidAmount] = useState("");
-  const [walletConnected, setWalletConnected] = useState(false);
-  const [showWalletModal, setShowWalletModal] = useState(false);
+  
+  // Auction data from chain
+  const [auctions, setAuctions] = useState<DisplayAuction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Create auction form
+  const [createForm, setCreateForm] = useState({
+    title: "",
+    description: "",
+    minBid: "",
+    duration: "",
+  });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [createSuccess, setCreateSuccess] = useState("");
+  
+  // Bid placement
+  const [bidding, setBidding] = useState(false);
+  const [bidError, setBidError] = useState("");
+  const [bidSuccess, setBidSuccess] = useState("");
+  
+  // User's bids
+  const [userBids, setUserBids] = useState<UserBid[]>([]);
 
-  const handleConnectWallet = () => {
-    if (walletConnected) {
-      setWalletConnected(false);
-    } else {
-      setShowWalletModal(true);
+  // Load auctions from chain
+  const loadAuctions = useCallback(async (showRefreshIndicator = false) => {
+    if (showRefreshIndicator) setRefreshing(true);
+    else setLoading(true);
+    
+    try {
+      const conn = getConnection();
+      const fetchedAuctions = await fetchAllAuctions(conn);
+      setAuctions(fetchedAuctions);
+    } catch (error) {
+      console.error("Failed to load auctions:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
+  }, []);
+
+  // Load user bids from localStorage
+  const loadUserBids = useCallback(() => {
+    if (publicKey) {
+      const stored = localStorage.getItem(`bids_${publicKey.toBase58()}`);
+      if (stored) {
+        setUserBids(JSON.parse(stored));
+      } else {
+        setUserBids([]);
+      }
+    }
+  }, [publicKey]);
+
+  // Save user bids to localStorage
+  const saveUserBid = (bid: UserBid) => {
+    if (!publicKey) return;
+    const key = `bids_${publicKey.toBase58()}`;
+    const stored = localStorage.getItem(key);
+    const bids: UserBid[] = stored ? JSON.parse(stored) : [];
+    bids.unshift(bid);
+    localStorage.setItem(key, JSON.stringify(bids));
+    setUserBids(bids);
   };
 
-  const confirmWalletConnect = () => {
-    setWalletConnected(true);
-    setShowWalletModal(false);
-  };
+  // Initial load
+  useEffect(() => {
+    loadAuctions();
+  }, [loadAuctions]);
 
+  // Load user bids when wallet connects
+  useEffect(() => {
+    loadUserBids();
+  }, [loadUserBids]);
+
+  // Format time left
   const formatTimeLeft = (endTime: string) => {
     const end = new Date(endTime).getTime();
     const now = Date.now();
@@ -111,6 +164,120 @@ export default function Home() {
     if (days > 0) return `${days}d ${hours}h left`;
     if (hours > 0) return `${hours}h ${minutes}m left`;
     return `${minutes}m left`;
+  };
+
+  // Truncate public key for display
+  const truncateKey = (key: string) => {
+    if (!key || key.length < 8) return key;
+    return `${key.slice(0, 4)}...${key.slice(-3)}`;
+  };
+
+  // Handle wallet connect
+  const handleConnectWallet = () => {
+    if (connected) {
+      disconnect();
+    } else {
+      setVisible(true);
+    }
+  };
+
+  // Create auction handler
+  const handleCreateAuction = async () => {
+    if (!connected || !publicKey || !signTransaction) {
+      setCreateError("Please connect your wallet first");
+      return;
+    }
+
+    if (!createForm.minBid || !createForm.duration) {
+      setCreateError("Please fill in all required fields");
+      return;
+    }
+
+    const minBid = parseFloat(createForm.minBid);
+    const duration = parseInt(createForm.duration);
+
+    if (isNaN(minBid) || minBid <= 0) {
+      setCreateError("Invalid minimum bid amount");
+      return;
+    }
+
+    if (isNaN(duration) || duration <= 0) {
+      setCreateError("Invalid duration");
+      return;
+    }
+
+    setCreating(true);
+    setCreateError("");
+    setCreateSuccess("");
+
+    try {
+      const auctionId = generateAuctionId();
+      const auctionPda = deriveAuctionPda(auctionId);
+      
+      setCreateSuccess(
+        `Auction creation intent recorded! Due to Arcium MPC complexity, ` +
+        `full on-chain creation requires additional node setup. ` +
+        `Auction PDA: ${auctionPda.toBase58().slice(0, 8)}...`
+      );
+      
+      setCreateForm({ title: "", description: "", minBid: "", duration: "" });
+      setTimeout(() => loadAuctions(true), 3000);
+      
+    } catch (error: unknown) {
+      console.error("Create auction error:", error);
+      setCreateError(error instanceof Error ? error.message : "Failed to create auction");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // Place bid handler
+  const handlePlaceBid = async () => {
+    if (!connected || !publicKey || !selectedAuction) {
+      setBidError("Please connect your wallet first");
+      return;
+    }
+
+    if (!bidAmount || parseFloat(bidAmount) < selectedAuction.minBid) {
+      setBidError(`Bid must be at least ${selectedAuction.minBid} SOL`);
+      return;
+    }
+
+    setBidding(true);
+    setBidError("");
+    setBidSuccess("");
+
+    try {
+      const bidAmountNum = parseFloat(bidAmount);
+      
+      const newBid: UserBid = {
+        auctionId: selectedAuction.id,
+        auctionPublicKey: selectedAuction.publicKey,
+        auctionTitle: selectedAuction.title,
+        bidAmount: bidAmountNum,
+        timestamp: Date.now(),
+        status: "pending",
+      };
+      
+      saveUserBid(newBid);
+      
+      setBidSuccess(
+        `Bid of ${bidAmountNum} SOL recorded! In production, this would be ` +
+        `encrypted via Arcium MPC before submission.`
+      );
+      
+      setTimeout(() => {
+        setSelectedAuction(null);
+        setBidAmount("");
+        setBidSuccess("");
+      }, 3000);
+      
+    } catch (error: unknown) {
+      console.error("Place bid error:", error);
+      setBidError(error instanceof Error ? error.message : "Failed to place bid");
+    } finally {
+      setBidding(false);
+    }
   };
 
   return (
@@ -151,14 +318,14 @@ export default function Home() {
               onClick={handleConnectWallet}
               className="px-5 py-2.5 rounded-xl font-semibold text-sm transition-all duration-300 hover:scale-105"
               style={{
-                background: walletConnected 
+                background: connected 
                   ? colors.surface 
                   : `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
                 color: colors.text,
-                border: walletConnected ? `1px solid ${colors.primary}40` : "none"
+                border: connected ? `1px solid ${colors.primary}40` : "none"
               }}
             >
-              {walletConnected ? "Fx4G...jUc (Demo)" : "Connect Wallet"}
+              {connected && publicKey ? truncateKey(publicKey.toBase58()) : "Connect Wallet"}
             </button>
           </div>
         </div>
@@ -192,7 +359,7 @@ export default function Home() {
               style={{ 
                 backgroundImage: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`
               }}>
-              Solana
+              Solana Devnet
             </span>
           </h2>
           
@@ -256,10 +423,54 @@ export default function Home() {
       <main className="max-w-7xl mx-auto px-6 pb-16">
         {/* Browse Auctions Tab */}
         {activeTab === "browse" && (
+          <div>
+            {/* Refresh Button */}
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => loadAuctions(true)}
+                disabled={refreshing}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-all"
+                style={{
+                  background: colors.surface,
+                  color: colors.textMuted,
+                  border: `1px solid ${colors.primary}30`
+                }}
+              >
+                {refreshing ? <SpinnerIcon /> : "🔄"} Refresh
+              </button>
+            </div>
+            
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-20">
+                <SpinnerIcon className="w-10 h-10 mb-4" />
+                <p style={{ color: colors.textMuted }}>Loading auctions from Solana Devnet...</p>
+              </div>
+            ) : auctions.length === 0 ? (
+              <div className="text-center py-16 rounded-2xl"
+                style={{ background: colors.surface, border: `1px solid ${colors.primary}20` }}>
+                <LockIcon className="w-16 h-16 mx-auto mb-4" style={{ color: colors.primary }} />
+                <h3 className="text-xl font-bold mb-2" style={{ color: colors.text }}>
+                  No Auctions Found
+                </h3>
+                <p className="mb-6" style={{ color: colors.textMuted }}>
+                  No auctions exist on-chain yet. Be the first to create one!
+                </p>
+                <button
+                  onClick={() => setActiveTab("create")}
+                  className="px-6 py-3 rounded-xl font-semibold"
+                  style={{
+                    background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
+                    color: colors.text
+                  }}
+                >
+                  Create Auction
+                </button>
+              </div>
+            ) : (
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {mockAuctions.map((auction) => (
+            {auctions.map((auction) => (
               <div
-                key={auction.id}
+                key={auction.publicKey}
                 className="rounded-2xl p-6 transition-all duration-300 hover:scale-[1.02] cursor-pointer"
                 style={{
                   background: colors.surface,
@@ -306,15 +517,17 @@ export default function Home() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs" style={{ color: colors.textMuted }}>Bids</p>
-                    <p className="font-bold flex items-center gap-1" style={{ color: colors.text }}>
+                    <p className="text-xs" style={{ color: colors.textMuted }}>Authority</p>
+                    <p className="font-bold text-xs flex items-center gap-1" style={{ color: colors.text }}>
                       <LockIcon className="w-3 h-3" style={{ color: colors.primary }} />
-                      {auction.bidCount}
+                      {truncateKey(auction.authority)}
                     </p>
                   </div>
                 </div>
               </div>
             ))}
+          </div>
+            )}
           </div>
         )}
 
@@ -340,6 +553,18 @@ export default function Home() {
               </div>
             </div>
             
+            {createError && (
+              <div className="p-4 rounded-xl mb-4" style={{ background: `${colors.error}20`, border: `1px solid ${colors.error}40` }}>
+                <p className="text-sm" style={{ color: colors.error }}>{createError}</p>
+              </div>
+            )}
+            
+            {createSuccess && (
+              <div className="p-4 rounded-xl mb-4" style={{ background: `${colors.success}20`, border: `1px solid ${colors.success}40` }}>
+                <p className="text-sm" style={{ color: colors.success }}>{createSuccess}</p>
+              </div>
+            )}
+            
             <div className="space-y-5">
               <div>
                 <label className="block text-sm font-medium mb-2" style={{ color: colors.text }}>
@@ -347,6 +572,8 @@ export default function Home() {
                 </label>
                 <input
                   type="text"
+                  value={createForm.title}
+                  onChange={(e) => setCreateForm({...createForm, title: e.target.value})}
                   placeholder="Enter auction title..."
                   className="w-full px-4 py-3 rounded-xl outline-none transition-all duration-200"
                   style={{
@@ -362,6 +589,8 @@ export default function Home() {
                   Description
                 </label>
                 <textarea
+                  value={createForm.description}
+                  onChange={(e) => setCreateForm({...createForm, description: e.target.value})}
                   placeholder="Describe your auction item..."
                   rows={4}
                   className="w-full px-4 py-3 rounded-xl outline-none transition-all duration-200 resize-none"
@@ -376,10 +605,12 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-2" style={{ color: colors.text }}>
-                    Minimum Bid (SOL)
+                    Minimum Bid (SOL) *
                   </label>
                   <input
                     type="number"
+                    value={createForm.minBid}
+                    onChange={(e) => setCreateForm({...createForm, minBid: e.target.value})}
                     placeholder="0.5"
                     step="0.1"
                     className="w-full px-4 py-3 rounded-xl outline-none transition-all duration-200"
@@ -392,10 +623,12 @@ export default function Home() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-2" style={{ color: colors.text }}>
-                    Duration (hours)
+                    Duration (hours) *
                   </label>
                   <input
                     type="number"
+                    value={createForm.duration}
+                    onChange={(e) => setCreateForm({...createForm, duration: e.target.value})}
                     placeholder="24"
                     className="w-full px-4 py-3 rounded-xl outline-none transition-all duration-200"
                     style={{
@@ -422,15 +655,39 @@ export default function Home() {
                 </div>
               </div>
               
+              <div className="p-4 rounded-xl" style={{ background: `${colors.warning}10`, border: `1px solid ${colors.warning}30` }}>
+                <div className="flex items-start gap-3">
+                  <span className="text-lg">⚠️</span>
+                  <div>
+                    <p className="font-medium text-sm" style={{ color: colors.warning }}>
+                      Devnet Integration Note
+                    </p>
+                    <p className="text-xs mt-1" style={{ color: colors.textMuted }}>
+                      Full Arcium MPC auction creation requires additional Arcium node setup.
+                      This form demonstrates the intent - full integration coming soon.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
               <button
-                className="w-full py-4 rounded-xl font-bold text-lg transition-all duration-300 hover:scale-[1.02] disabled:opacity-50"
+                onClick={handleCreateAuction}
+                disabled={!connected || creating}
+                className="w-full py-4 rounded-xl font-bold text-lg transition-all duration-300 hover:scale-[1.02] disabled:opacity-50 flex items-center justify-center gap-2"
                 style={{
                   background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
                   color: colors.text
                 }}
-                disabled={!walletConnected}
               >
-                {walletConnected ? "Create Encrypted Auction" : "Connect Wallet to Create"}
+                {creating ? (
+                  <>
+                    <SpinnerIcon /> Creating...
+                  </>
+                ) : connected ? (
+                  "Create Encrypted Auction"
+                ) : (
+                  "Connect Wallet to Create"
+                )}
               </button>
             </div>
           </div>
@@ -439,7 +696,7 @@ export default function Home() {
         {/* My Bids Tab */}
         {activeTab === "mybids" && (
           <div className="max-w-3xl mx-auto">
-            {!walletConnected ? (
+            {!connected ? (
               <div className="text-center py-16 rounded-2xl"
                 style={{ 
                   background: colors.surface,
@@ -453,7 +710,7 @@ export default function Home() {
                   Connect your wallet to view your encrypted bids
                 </p>
                 <button
-                  onClick={() => setWalletConnected(true)}
+                  onClick={handleConnectWallet}
                   className="px-6 py-3 rounded-xl font-semibold transition-all duration-300 hover:scale-105"
                   style={{
                     background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
@@ -463,29 +720,73 @@ export default function Home() {
                   Connect Wallet
                 </button>
               </div>
+            ) : userBids.length === 0 ? (
+              <div className="text-center py-16 rounded-2xl"
+                style={{ 
+                  background: colors.surface,
+                  border: `1px solid ${colors.primary}20`
+                }}>
+                <LockIcon className="w-16 h-16 mx-auto mb-4" style={{ color: colors.primary }} />
+                <h3 className="text-xl font-bold mb-2" style={{ color: colors.text }}>
+                  No Bids Yet
+                </h3>
+                <p className="mb-6" style={{ color: colors.textMuted }}>
+                  You haven&apos;t placed any bids yet. Browse auctions to get started!
+                </p>
+                <button
+                  onClick={() => setActiveTab("browse")}
+                  className="px-6 py-3 rounded-xl font-semibold transition-all duration-300 hover:scale-105"
+                  style={{
+                    background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
+                    color: colors.text
+                  }}
+                >
+                  Browse Auctions
+                </button>
+              </div>
             ) : (
               <div className="space-y-4">
-                <div className="p-5 rounded-xl flex items-center justify-between"
+                {userBids.map((bid, index) => (
+                <div key={index} className="p-5 rounded-xl flex items-center justify-between"
                   style={{ 
                     background: colors.surface,
-                    border: `1px solid ${colors.primary}20`
+                    border: `1px solid ${bid.status === "won" ? colors.success : colors.primary}30`
                   }}>
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-xl flex items-center justify-center"
-                      style={{ background: `${colors.primary}20` }}>
-                      <LockIcon style={{ color: colors.primary }} />
+                      style={{ 
+                        background: bid.status === "won" 
+                          ? `${colors.success}20` 
+                          : `${colors.primary}20` 
+                      }}>
+                      {bid.status === "won" ? (
+                        <ShieldIcon style={{ color: colors.success }} />
+                      ) : (
+                        <LockIcon style={{ color: colors.primary }} />
+                      )}
                     </div>
                     <div>
                       <h4 className="font-bold" style={{ color: colors.text }}>
-                        Rare Digital Artwork #001
+                        {bid.auctionTitle}
                       </h4>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs px-2 py-0.5 rounded-full"
-                          style={{ background: `${colors.warning}20`, color: colors.warning }}>
-                          Pending
+                          style={{ 
+                            background: bid.status === "pending" 
+                              ? `${colors.warning}20`
+                              : bid.status === "won"
+                              ? `${colors.success}20`
+                              : `${colors.textMuted}20`,
+                            color: bid.status === "pending"
+                              ? colors.warning
+                              : bid.status === "won"
+                              ? colors.success
+                              : colors.textMuted
+                          }}>
+                          {bid.status.charAt(0).toUpperCase() + bid.status.slice(1)}
                         </span>
                         <span className="text-xs" style={{ color: colors.textMuted }}>
-                          Ends in 6d 4h
+                          {new Date(bid.timestamp).toLocaleDateString()}
                         </span>
                       </div>
                     </div>
@@ -494,43 +795,11 @@ export default function Home() {
                     <p className="text-xs" style={{ color: colors.textMuted }}>Your Bid</p>
                     <p className="font-bold flex items-center gap-1" style={{ color: colors.primary }}>
                       <LockIcon className="w-3 h-3" />
-                      Encrypted
+                      {bid.bidAmount} SOL
                     </p>
                   </div>
                 </div>
-                
-                <div className="p-5 rounded-xl flex items-center justify-between"
-                  style={{ 
-                    background: colors.surface,
-                    border: `1px solid ${colors.success}30`
-                  }}>
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center"
-                      style={{ background: `${colors.success}20` }}>
-                      <ShieldIcon style={{ color: colors.success }} />
-                    </div>
-                    <div>
-                      <h4 className="font-bold" style={{ color: colors.text }}>
-                        Exclusive Access Token
-                      </h4>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs px-2 py-0.5 rounded-full"
-                          style={{ background: `${colors.success}20`, color: colors.success }}>
-                          Won
-                        </span>
-                        <span className="text-xs" style={{ color: colors.textMuted }}>
-                          Ended 2 days ago
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs" style={{ color: colors.textMuted }}>Winning Bid</p>
-                    <p className="font-bold" style={{ color: colors.success }}>
-                      2.5 SOL
-                    </p>
-                  </div>
-                </div>
+                ))}
               </div>
             )}
           </div>
@@ -542,7 +811,11 @@ export default function Home() {
         <div 
           className="fixed inset-0 flex items-center justify-center p-4 z-50"
           style={{ background: "rgba(0,0,0,0.8)" }}
-          onClick={() => setSelectedAuction(null)}
+          onClick={() => {
+            setSelectedAuction(null);
+            setBidError("");
+            setBidSuccess("");
+          }}
         >
           <div 
             className="w-full max-w-md rounded-2xl p-6"
@@ -557,7 +830,11 @@ export default function Home() {
                 Place Encrypted Bid
               </h3>
               <button 
-                onClick={() => setSelectedAuction(null)}
+                onClick={() => {
+                  setSelectedAuction(null);
+                  setBidError("");
+                  setBidSuccess("");
+                }}
                 className="w-8 h-8 rounded-lg flex items-center justify-center"
                 style={{ background: colors.darker }}
               >
@@ -569,10 +846,26 @@ export default function Home() {
               <h4 className="font-bold mb-1" style={{ color: colors.text }}>
                 {selectedAuction.title}
               </h4>
-              <p className="text-sm" style={{ color: colors.textMuted }}>
+              <p className="text-sm mb-2" style={{ color: colors.textMuted }}>
                 {selectedAuction.description}
               </p>
+              <div className="flex justify-between text-xs" style={{ color: colors.textMuted }}>
+                <span>Status: {selectedAuction.status}</span>
+                <span>{formatTimeLeft(selectedAuction.endTime)}</span>
+              </div>
             </div>
+            
+            {bidError && (
+              <div className="p-3 rounded-xl mb-4" style={{ background: `${colors.error}20`, border: `1px solid ${colors.error}40` }}>
+                <p className="text-sm" style={{ color: colors.error }}>{bidError}</p>
+              </div>
+            )}
+            
+            {bidSuccess && (
+              <div className="p-3 rounded-xl mb-4" style={{ background: `${colors.success}20`, border: `1px solid ${colors.success}40` }}>
+                <p className="text-sm" style={{ color: colors.success }}>{bidSuccess}</p>
+              </div>
+            )}
             
             <div className="mb-4">
               <label className="block text-sm font-medium mb-2" style={{ color: colors.text }}>
@@ -584,6 +877,7 @@ export default function Home() {
                 onChange={(e) => setBidAmount(e.target.value)}
                 placeholder={`Min: ${selectedAuction.minBid} SOL`}
                 step="0.1"
+                min={selectedAuction.minBid}
                 className="w-full px-4 py-3 rounded-xl outline-none"
                 style={{
                   background: colors.darker,
@@ -602,72 +896,26 @@ export default function Home() {
             </div>
             
             <button
-              className="w-full py-3 rounded-xl font-bold transition-all duration-300 hover:scale-[1.02] disabled:opacity-50"
+              onClick={handlePlaceBid}
+              disabled={!connected || bidding || selectedAuction.status !== "active"}
+              className="w-full py-3 rounded-xl font-bold transition-all duration-300 hover:scale-[1.02] disabled:opacity-50 flex items-center justify-center gap-2"
               style={{
                 background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
                 color: colors.text
               }}
-              disabled={!walletConnected || !bidAmount}
             >
-              {walletConnected ? "Submit Encrypted Bid" : "Connect Wallet"}
+              {bidding ? (
+                <>
+                  <SpinnerIcon /> Placing Bid...
+                </>
+              ) : !connected ? (
+                "Connect Wallet"
+              ) : selectedAuction.status !== "active" ? (
+                "Auction Ended"
+              ) : (
+                "Submit Encrypted Bid"
+              )}
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* Wallet Connect Modal */}
-      {showWalletModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.8)" }}>
-          <div className="w-full max-w-md rounded-2xl p-6"
-            style={{ background: colors.surface, border: `1px solid ${colors.primary}40` }}>
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold" style={{ color: colors.text }}>
-                Connect Wallet
-              </h3>
-              <button 
-                onClick={() => setShowWalletModal(false)}
-                className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-                style={{ color: colors.textMuted }}
-              >
-                ✕
-              </button>
-            </div>
-            
-            <div className="p-4 rounded-xl mb-4" style={{ background: `${colors.warning}20`, border: `1px solid ${colors.warning}40` }}>
-              <p className="text-sm" style={{ color: colors.warning }}>
-                <strong>Demo Mode:</strong> This is a demonstration. No real wallet will be connected.
-              </p>
-            </div>
-            
-            <p className="text-sm mb-6" style={{ color: colors.textMuted }}>
-              By connecting, you agree to simulate a wallet connection for demo purposes. 
-              In production, this would connect to your Phantom or Solflare wallet.
-            </p>
-            
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowWalletModal(false)}
-                className="flex-1 py-3 rounded-xl font-semibold transition-all"
-                style={{ 
-                  background: colors.surfaceLight, 
-                  color: colors.text,
-                  border: `1px solid ${colors.primary}30`
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={confirmWalletConnect}
-                className="flex-1 py-3 rounded-xl font-semibold transition-all hover:scale-[1.02]"
-                style={{
-                  background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.secondary} 100%)`,
-                  color: colors.text
-                }}
-              >
-                Connect (Demo)
-              </button>
-            </div>
           </div>
         </div>
       )}
@@ -679,7 +927,7 @@ export default function Home() {
             <span style={{ color: colors.textMuted }}>Built with</span>
             <span className="font-bold" style={{ color: colors.primary }}>Arcium MPC</span>
             <span style={{ color: colors.textMuted }}>on</span>
-            <span className="font-bold" style={{ color: colors.secondary }}>Solana</span>
+            <span className="font-bold" style={{ color: colors.secondary }}>Solana Devnet</span>
           </div>
           <div className="flex items-center gap-4 text-sm" style={{ color: colors.textMuted }}>
             <a href="https://github.com/giwaov/arcium-blind-auction" 
