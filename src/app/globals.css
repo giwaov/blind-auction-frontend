@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+:root {
+  /* Arcium Brand Colors */
+  --arcium-primary: #8B5CF6;
+  --arcium-primary-dark: #7C3AED;
+  --arcium-primary-light: #A78BFA;
+  --arcium-secondary: #06B6D4;
+  --arcium-accent: #F472B6;
+  --arcium-dark: #0F0F23;
+  --arcium-darker: #070714;
+  --arcium-surface: #1A1A2E;
+  --arcium-surface-light: #252542;
+  --arcium-text: #F8FAFC;
+  --arcium-text-muted: #94A3B8;
+  --arcium-success: #10B981;
+  --arcium-warning: #F59E0B;
+  --arcium-error: #EF4444;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+  background: var(--arcium-darker);
+  color: var(--arcium-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--arcium-darker);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--arcium-primary);
+  border-radius: 4px;
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(139, 92, 246, 0.6);
+  }
+}
+
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-gradient {
+  background: linear-gradient(-45deg, #8B5CF6, #06B6D4, #F472B6, #8B5CF6);
+  background-size: 400% 400%;
+  animation: gradient-shift 4s ease infinite;
+}
